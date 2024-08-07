@@ -1,9 +1,10 @@
 //use raylib::prelude::*;
 
+use core::panic;
+
 #[derive(Debug)]
 #[allow(dead_code)] //TODO: remove
 pub struct Chip8 {
-    opcode: u8,
     memory: [u8; 4095],
     graphics: [u8; 64 * 32],
     registers: [u8; 16],
@@ -35,6 +36,7 @@ const FONT_SET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 
+#[allow(dead_code)] //TODO: remove
 impl Chip8 {
     fn new() -> Self {
         let mut memory = [0; 4095];
@@ -42,7 +44,6 @@ impl Chip8 {
         memory[..FONT_SET.len()].copy_from_slice(&FONT_SET);
 
         Self {
-            opcode: 0,
             memory,
             graphics: [0; 64 * 32],
             registers: [0; 16],
@@ -53,6 +54,28 @@ impl Chip8 {
             stack: [0; 16],
             sp: 0,
             keys: [0; 16],
+        }
+    }
+    fn increment_pc(&mut self) {
+        self.program_counter += 2
+    }
+    fn cycle(&mut self) {
+        let msb = self.memory[self.program_counter as usize] >> 4;
+        let opcode = (self.memory[self.program_counter as usize] as u16) << 8;
+        let operands = self.memory[self.program_counter as usize + 1] as u16;
+        let instruction = opcode | operands;
+
+        match msb {
+            0x0 => {
+                match instruction {
+                    0x00E0 => self.graphics.iter_mut().for_each(|pixel| *pixel = 0),
+                    0x00EE => todo!(),
+                    _ => panic!("SYS Instructions are not handled!"),
+                }
+                self.increment_pc()
+            }
+            0x1 => todo!(),
+            _ => unreachable!(),
         }
     }
 }
