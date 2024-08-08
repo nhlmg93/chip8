@@ -1,5 +1,7 @@
 //use raylib::prelude::*;
 
+use std::{fs, path::Path};
+
 #[derive(Debug)]
 #[allow(dead_code)] //TODO: remove
 pub struct Chip8 {
@@ -33,6 +35,9 @@ const FONT_SET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+
+const PROG_MEM_MIN: usize = 0x200;
+const PROG_MEM_MAX: usize = 0x600;
 
 #[allow(dead_code)] //TODO: remove
 impl Chip8 {
@@ -77,13 +82,18 @@ impl Chip8 {
             _ => unreachable!(),
         }
     }
+    fn load_rom<P: AsRef<Path>>(&mut self, file: P) {
+        let rom = fs::read(file).expect("File not found.");
+        rom.iter()
+            .enumerate()
+            .take_while(|(i, _)| (*i + PROG_MEM_MIN) < PROG_MEM_MAX)
+            .for_each(|(i, &b)| self.memory[i + PROG_MEM_MIN] = b)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const MAX_ITERPRETER_MEMORY: usize = 0x200;
 
     #[test]
     fn font_set_loads_into_memory() {
@@ -91,13 +101,27 @@ mod tests {
         cpu.memory
             .iter()
             .enumerate()
-            .take_while(|(i, _)| *i < FONT_SET.len() && *i < MAX_ITERPRETER_MEMORY)
+            .take_while(|(i, _)| *i < FONT_SET.len() && *i < PROG_MEM_MIN)
             .for_each(|(i, &b)| assert_eq!(b, FONT_SET[i]));
+    }
+    #[test]
+    fn loads_rom_into_memory() {
+        let mut cpu = Chip8::new();
+        let path = "chip8-test-rom/test_opcode.ch8";
+        let rom_bytes = fs::read(path).expect("File not found.");
+
+        cpu.load_rom(path.to_string());
+
+        rom_bytes
+            .iter()
+            .enumerate()
+            .for_each(|(i, &b)| assert_eq!(b, cpu.memory[PROG_MEM_MIN + i]));
     }
 }
 
 fn main() {
-    let _cpu = Chip8::new();
+    let mut cpu = Chip8::new();
+    cpu.load_rom("chip8-test-rom/test_opcode.ch8");
 
     //TODO: load ROM
     /*
