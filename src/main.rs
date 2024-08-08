@@ -1,7 +1,5 @@
 //use raylib::prelude::*;
 
-use core::panic;
-
 #[derive(Debug)]
 #[allow(dead_code)] //TODO: remove
 pub struct Chip8 {
@@ -60,10 +58,11 @@ impl Chip8 {
         self.program_counter += 2
     }
     fn cycle(&mut self) {
-        let msb = self.memory[self.program_counter as usize] >> 4;
         let opcode = (self.memory[self.program_counter as usize] as u16) << 8;
         let operands = self.memory[self.program_counter as usize + 1] as u16;
         let instruction = opcode | operands;
+
+        let msb = self.memory[self.program_counter as usize] >> 4;
 
         match msb {
             0x0 => {
