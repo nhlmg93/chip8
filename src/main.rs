@@ -73,7 +73,10 @@ impl Chip8 {
             0x0 => {
                 match instruction {
                     0x00E0 => self.graphics.iter_mut().for_each(|pixel| *pixel = 0),
-                    0x00EE => todo!(),
+                    0x00EE => {
+                        self.program_counter = self.stack[self.sp as usize];
+                        self.sp -= 1;
+                    }
                     _ => panic!("SYS Instructions are not handled!"),
                 }
                 self.increment_pc()
