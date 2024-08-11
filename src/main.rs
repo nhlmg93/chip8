@@ -1,5 +1,6 @@
 //use raylib::prelude::*;
 
+use core::panic;
 use std::{fs, path::Path};
 
 #[derive(Debug)]
@@ -39,6 +40,41 @@ const FONT_SET: [u8; 80] = [
 const PROG_MEM_MIN: usize = 0x200;
 const PROG_MEM_MAX: usize = 0x600;
 
+#[repr(u16)]
+enum Instructions {
+    CLS = 0x00E0,
+    RET = 0x00EE,
+    JP = 0x1,
+    Undefined,
+}
+
+impl From<u16> for Instructions {
+    fn from(instruction: u16) -> Self {
+        let _opcode = (instruction & 0xFF00) >> 8;
+        let _operands = instruction & 0x00FF;
+        let msb = (instruction & 0xF000) >> 12;
+        match msb {
+            0x0 => match instruction {
+                0x00E0 => Instructions::CLS,
+                0x00EE => Instructions::RET,
+                _ => {
+                    // Todo Remove Debug
+                    let hex_v = format!("{:X}", instruction);
+                    print!("{hex_v}\n");
+                    Instructions::Undefined
+                }
+            },
+            0x1 => Instructions::JP,
+            _ => {
+                // Todo Remove Debug
+                let hex_v = format!("{:X}", instruction);
+                print!("{hex_v}\n");
+                Instructions::Undefined
+            }
+        }
+    }
+}
+
 #[allow(dead_code)] //TODO: remove
 impl Chip8 {
     fn new() -> Self {
@@ -51,7 +87,7 @@ impl Chip8 {
             graphics: [0; 64 * 32],
             registers: [0; 16],
             index: 0,
-            program_counter: 0,
+            program_counter: 0x200,
             delay_timer: 0,
             sound_timer: 0,
             stack: [0; 16],
@@ -65,24 +101,15 @@ impl Chip8 {
     fn cycle(&mut self) {
         let opcode = (self.memory[self.program_counter as usize] as u16) << 8;
         let operands = self.memory[self.program_counter as usize + 1] as u16;
-        let instruction = opcode | operands;
-
-        let msb = self.memory[self.program_counter as usize] >> 4;
-
-        match msb {
-            0x0 => {
-                match instruction {
-                    0x00E0 => self.graphics.iter_mut().for_each(|pixel| *pixel = 0),
-                    0x00EE => {
-                        self.program_counter = self.stack[self.sp as usize];
-                        self.sp -= 1;
-                    }
-                    _ => panic!("SYS Instructions are not handled!"),
-                }
-                self.increment_pc()
+        let instruction = Instructions::from(opcode | operands);
+        match instruction {
+            Instructions::CLS => self.graphics.iter_mut().for_each(|pixel| *pixel = 0),
+            Instructions::RET => {
+                self.program_counter = self.stack[self.sp as usize];
+                self.sp -= 1;
             }
-            0x1 => todo!(),
-            _ => unreachable!(),
+            Instructions::JP => todo!(),
+            Instructions::Undefined => panic!("Instruction Undefined"),
         }
     }
     fn load_rom<P: AsRef<Path>>(&mut self, file: P) {
@@ -119,6 +146,16 @@ mod tests {
             .iter()
             .enumerate()
             .for_each(|(i, &b)| assert_eq!(b, cpu.memory[PROG_MEM_MIN + i]));
+    }
+    #[test]
+    fn instruction_cls_clears_the_screen() {
+        let mut cpu = Chip8::new();
+        cpu.graphics.iter_mut().for_each(|byte| *byte = 1);
+        cpu.memory[PROG_MEM_MIN] = 0x00;
+        cpu.memory[PROG_MEM_MIN + 1] = 0xE0;
+        cpu.cycle();
+
+        cpu.graphics.iter().for_each(|b| assert_eq!(*b, 0))
     }
 }
 
