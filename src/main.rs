@@ -42,21 +42,23 @@ const PROG_MEM_MAX: usize = 0x600;
 
 #[repr(u16)]
 enum Instructions {
-    CLS = 0x00E0,
-    RET = 0x00EE,
-    JP = 0x1,
+    Cls = 0x00E0,
+    Ret = 0x00EE,
+    Jp = 0x1,
+    Call = 0x2,
+    SeVxByte = 0x3,
+    SneVxByte = 0x4,
+    SneVxVy = 0x5,
     Undefined,
 }
 
 impl From<u16> for Instructions {
     fn from(instruction: u16) -> Self {
-        let _opcode = (instruction & 0xFF00) >> 8;
-        let _operands = instruction & 0x00FF;
         let msb = (instruction & 0xF000) >> 12;
         match msb {
             0x0 => match instruction {
-                0x00E0 => Instructions::CLS,
-                0x00EE => Instructions::RET,
+                0x00E0 => Instructions::Cls,
+                0x00EE => Instructions::Ret,
                 _ => {
                     // Todo Remove Debug
                     let hex_v = format!("{:X}", instruction);
@@ -64,7 +66,11 @@ impl From<u16> for Instructions {
                     Instructions::Undefined
                 }
             },
-            0x1 => Instructions::JP,
+            0x1 => Instructions::Jp,
+            0x2 => Instructions::Call,
+            0x3 => Instructions::SeVxByte,
+            0x4 => Instructions::SneVxByte,
+            0x5 => Instructions::SneVxVy,
             _ => {
                 // Todo Remove Debug
                 let hex_v = format!("{:X}", instruction);
@@ -103,12 +109,41 @@ impl Chip8 {
         let operands = self.memory[self.program_counter as usize + 1] as u16;
         let instruction = Instructions::from(opcode | operands);
         match instruction {
-            Instructions::CLS => self.graphics.iter_mut().for_each(|pixel| *pixel = 0),
-            Instructions::RET => {
+            Instructions::Cls => self.graphics.iter_mut().for_each(|pixel| *pixel = 0),
+            Instructions::Ret => {
                 self.program_counter = self.stack[self.sp as usize];
                 self.sp -= 1;
             }
-            Instructions::JP => todo!(),
+            Instructions::Jp => self.program_counter = (opcode | operands) & 0x0FFF,
+            Instructions::Call => {
+                self.sp += 1;
+                self.stack[self.sp as usize] = self.program_counter;
+                self.program_counter = (opcode | operands) & 0x0FFF
+            }
+            Instructions::SeVxByte => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let kk = (opcode | operands) & 0x00FF;
+                if self.registers[vx as usize] == kk as u8 {
+                    self.increment_pc()
+                }
+            }
+            Instructions::SneVxByte => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let kk = (opcode | operands) & 0x00FF;
+                if self.registers[vx as usize] != kk as u8 {
+                    self.increment_pc()
+                }
+            }
+            Instructions::SneVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+                if self.registers[vx as usize] == self.registers[vy as usize] {
+                    self.increment_pc();
+                }
+            }
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
     }
@@ -119,6 +154,26 @@ impl Chip8 {
             .take_while(|(i, _)| (*i + PROG_MEM_MIN) < PROG_MEM_MAX)
             .for_each(|(i, &b)| self.memory[i + PROG_MEM_MIN] = b)
     }
+}
+
+fn main() {
+    let mut cpu = Chip8::new();
+    cpu.load_rom("chip8-test-rom/test_opcode.ch8");
+
+    //TODO: load ROM
+    /*
+        let (mut rl, thread) = raylib::init()
+            .size(640, 480)
+            .title("Chip8 Emulator")
+            .build();
+
+        while !rl.window_should_close() {
+            let mut d = rl.begin_drawing(&thread);
+
+            d.clear_background(Color::BLACK);
+            //TODO: Scale and display graphics
+        }
+    */
 }
 
 #[cfg(test)]
@@ -157,24 +212,61 @@ mod tests {
 
         cpu.graphics.iter().for_each(|b| assert_eq!(*b, 0))
     }
-}
 
-fn main() {
-    let mut cpu = Chip8::new();
-    cpu.load_rom("chip8-test-rom/test_opcode.ch8");
+    #[test]
+    fn instruction_jp_jumps_to_address() {
+        let mut cpu = Chip8::new();
+        cpu.memory[PROG_MEM_MIN] = 0x13;
+        cpu.memory[PROG_MEM_MIN + 1] = 0x00;
+        cpu.cycle();
+        assert_eq!(cpu.program_counter, 0x300);
+    }
 
-    //TODO: load ROM
-    /*
-        let (mut rl, thread) = raylib::init()
-            .size(640, 480)
-            .title("Chip8 Emulator")
-            .build();
+    #[test]
+    fn instruction_call_calls_subroutine() {
+        let mut cpu = Chip8::new();
+        cpu.memory[PROG_MEM_MIN] = 0x23;
+        cpu.memory[PROG_MEM_MIN + 1] = 0x00;
+        cpu.cycle();
+        assert_eq!(cpu.sp, 1);
+        assert_eq!(cpu.stack[cpu.sp as usize], 0x200);
+        assert_eq!(cpu.program_counter, 0x300);
+    }
 
-        while !rl.window_should_close() {
-            let mut d = rl.begin_drawing(&thread);
+    #[test]
+    fn instruction_se_vx_byte_skips_next_instruction_when_eq() {
+        let mut cpu = Chip8::new();
+        let vx = 0x0A;
+        let kk = 0x05;
+        cpu.memory[PROG_MEM_MIN] = 0x30 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = kk;
+        cpu.registers[vx as usize] = kk;
+        cpu.cycle();
+        assert_eq!(cpu.program_counter, 0x0204);
+    }
 
-            d.clear_background(Color::BLACK);
-            //TODO: Scale and display graphics
-        }
-    */
+    #[test]
+    fn instruction_sne_vx_byte_skips_next_instruction_when_not_eq() {
+        let mut cpu = Chip8::new();
+        let vx = 0x0A;
+        let kk = 0x05;
+        cpu.memory[PROG_MEM_MIN] = 0x40 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = kk;
+        cpu.cycle();
+        assert_eq!(cpu.program_counter, 0x0204);
+    }
+
+    #[test]
+    fn instruction_sne_vx_vy_skips_next_instruction_when_eq() {
+        let mut cpu = Chip8::new();
+        let vx = 0x0A;
+        let vy = 0x50;
+        cpu.registers[vx as usize] = 0x0001;
+        cpu.registers[(vy >> 4) as usize] = 0x0001;
+        cpu.memory[PROG_MEM_MIN] = 0x50 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+        cpu.cycle();
+        assert_eq!(cpu.program_counter, 0x0204);
+    }
+
 }
