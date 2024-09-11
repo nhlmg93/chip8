@@ -1,7 +1,7 @@
 //use raylib::prelude::*;
 
 use core::panic;
-use std::{fs, path::Path};
+use std::{fs, path::Path, usize};
 
 #[derive(Debug)]
 #[allow(dead_code)] //TODO: remove
@@ -49,6 +49,7 @@ enum Instructions {
     SeVxByte = 0x3,
     SneVxByte = 0x4,
     SneVxVy = 0x5,
+    LdVxByte = 0x6,
     Undefined,
 }
 
@@ -71,6 +72,7 @@ impl From<u16> for Instructions {
             0x3 => Instructions::SeVxByte,
             0x4 => Instructions::SneVxByte,
             0x5 => Instructions::SneVxVy,
+            0x6 => Instructions::LdVxByte,
             _ => {
                 // Todo Remove Debug
                 let hex_v = format!("{:X}", instruction);
@@ -143,6 +145,12 @@ impl Chip8 {
                 if self.registers[vx as usize] == self.registers[vy as usize] {
                     self.increment_pc();
                 }
+            }
+            Instructions::LdVxByte => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let kk = (opcode | operands) & 0x00FF;
+                self.registers[vx as usize] = kk as u8;
             }
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
@@ -248,7 +256,7 @@ mod tests {
     #[test]
     fn instruction_sne_vx_byte_skips_next_instruction_when_not_eq() {
         let mut cpu = Chip8::new();
-        let vx = 0x0A;
+        let vx = 0x09;
         let kk = 0x05;
         cpu.memory[PROG_MEM_MIN] = 0x40 | vx;
         cpu.memory[PROG_MEM_MIN + 1] = kk;
@@ -268,5 +276,17 @@ mod tests {
         cpu.cycle();
         assert_eq!(cpu.program_counter, 0x0204);
     }
+    #[test]
+    fn instruction_ld_vx_byte_loads_eight_bit_value_into_register() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let kk = 0x04;
 
+        cpu.memory[PROG_MEM_MIN] = 0x60 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = kk;
+
+        cpu.cycle();
+        assert_eq!(cpu.program_counter, 0x0202);
+        assert_eq!(cpu.registers[vx as usize], kk);
+    }
 }
