@@ -50,6 +50,7 @@ enum Instructions {
     SneVxByte = 0x4,
     SneVxVy = 0x5,
     LdVxByte = 0x6,
+    AddVxByte = 0x7,
     Undefined,
 }
 
@@ -73,6 +74,7 @@ impl From<u16> for Instructions {
             0x4 => Instructions::SneVxByte,
             0x5 => Instructions::SneVxVy,
             0x6 => Instructions::LdVxByte,
+            0x7 => Instructions::AddVxByte,
             _ => {
                 // Todo Remove Debug
                 let hex_v = format!("{:X}", instruction);
@@ -151,6 +153,12 @@ impl Chip8 {
                 let vx = ((opcode | operands) & 0x0F00) >> 8;
                 let kk = (opcode | operands) & 0x00FF;
                 self.registers[vx as usize] = kk as u8;
+            }
+            Instructions::AddVxByte => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let kk = (opcode | operands) & 0x00FF;
+                self.registers[vx as usize] += kk as u8;
             }
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
@@ -288,5 +296,18 @@ mod tests {
         cpu.cycle();
         assert_eq!(cpu.program_counter, 0x0202);
         assert_eq!(cpu.registers[vx as usize], kk);
+    }
+    #[test]
+    fn instruction_add_bytes_to_register() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let kk = 0x01;
+
+        cpu.registers[vx as usize] = 0x0001;
+        cpu.memory[PROG_MEM_MIN] = 0x70 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = kk;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[vx as usize], kk + 1);
     }
 }
