@@ -51,9 +51,17 @@ enum Instructions {
     SneVxVy = 0x5,
     LdVxByte = 0x6,
     AddVxByte = 0x7,
+    LdVxVy = 0x8000,
+    OrVxVy = 0x8001,
+    AndVxVy = 0x8002,
+    XorVxVy = 0x8003,
+    AddVxVy = 0x8004,
+    SubVxVy = 0x8005,
+    ShrVxVy = 0x8006,
+    SubnVxVy = 0x8007,
+    ShlVxVy = 0x800E,
     Undefined,
 }
-
 impl From<u16> for Instructions {
     fn from(instruction: u16) -> Self {
         let msb = (instruction & 0xF000) >> 12;
@@ -75,6 +83,26 @@ impl From<u16> for Instructions {
             0x5 => Instructions::SneVxVy,
             0x6 => Instructions::LdVxByte,
             0x7 => Instructions::AddVxByte,
+            0x8 => {
+                let lsb = instruction & 0x000F;
+                match lsb {
+                    0x0 => Instructions::LdVxVy,
+                    0x1 => Instructions::OrVxVy,
+                    0x2 => Instructions::AndVxVy,
+                    0x3 => Instructions::XorVxVy,
+                    0x4 => Instructions::AddVxVy,
+                    0x5 => Instructions::SubVxVy,
+                    0x6 => Instructions::ShrVxVy,
+                    0x7 => Instructions::SubnVxVy,
+                    0xE => Instructions::ShlVxVy,
+                    _ => {
+                        // Todo Remove Debug
+                        let hex_v = format!("{:X}", instruction);
+                        print!("{hex_v}\n");
+                        Instructions::Undefined
+                    }
+                }
+            }
             _ => {
                 // Todo Remove Debug
                 let hex_v = format!("{:X}", instruction);
@@ -160,6 +188,15 @@ impl Chip8 {
                 let kk = (opcode | operands) & 0x00FF;
                 self.registers[vx as usize] += kk as u8;
             }
+            Instructions::LdVxVy => todo!(),
+            Instructions::OrVxVy => todo!(),
+            Instructions::AndVxVy => todo!(),
+            Instructions::XorVxVy => todo!(),
+            Instructions::ShlVxVy => todo!(),
+            Instructions::SubnVxVy => todo!(),
+            Instructions::ShrVxVy => todo!(),
+            Instructions::AddVxVy => todo!(),
+            Instructions::SubVxVy => todo!(),
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
     }
