@@ -38,7 +38,7 @@ const FONT_SET: [u8; 80] = [
 ];
 
 const PROG_MEM_MIN: usize = 0x200;
-const PROG_MEM_MAX: usize = 0x600;
+const PROG_MEM_MAX: usize = 0xFFF;
 
 #[repr(u16)]
 enum Instructions {
@@ -69,12 +69,7 @@ impl From<u16> for Instructions {
             0x0 => match instruction {
                 0x00E0 => Instructions::Cls,
                 0x00EE => Instructions::Ret,
-                _ => {
-                    // Todo Remove Debug
-                    let hex_v = format!("{:X}", instruction);
-                    print!("{hex_v}\n");
-                    Instructions::Undefined
-                }
+                _ => Instructions::Undefined,
             },
             0x1 => Instructions::Jp,
             0x2 => Instructions::Call,
@@ -95,20 +90,10 @@ impl From<u16> for Instructions {
                     0x6 => Instructions::ShrVxVy,
                     0x7 => Instructions::SubnVxVy,
                     0xE => Instructions::ShlVxVy,
-                    _ => {
-                        // Todo Remove Debug
-                        let hex_v = format!("{:X}", instruction);
-                        print!("{hex_v}\n");
-                        Instructions::Undefined
-                    }
+                    _ => Instructions::Undefined,
                 }
             }
-            _ => {
-                // Todo Remove Debug
-                let hex_v = format!("{:X}", instruction);
-                print!("{hex_v}\n");
-                Instructions::Undefined
-            }
+            _ => Instructions::Undefined,
         }
     }
 }
@@ -188,14 +173,52 @@ impl Chip8 {
                 let kk = (opcode | operands) & 0x00FF;
                 self.registers[vx as usize] += kk as u8;
             }
-            Instructions::LdVxVy => todo!(),
-            Instructions::OrVxVy => todo!(),
-            Instructions::AndVxVy => todo!(),
-            Instructions::XorVxVy => todo!(),
+            Instructions::LdVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+                self.registers[vx as usize] = self.registers[vy as usize];
+            }
+            Instructions::OrVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+                self.registers[vx as usize] |= self.registers[vy as usize];
+            }
+            Instructions::AndVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+                self.registers[vx as usize] &= self.registers[vy as usize];
+            }
+            Instructions::XorVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+                self.registers[vx as usize] ^= self.registers[vy as usize];
+            }
+            Instructions::AddVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+
+                let rx = self.registers[vx as usize] as u16;
+                let ry = self.registers[vy as usize] as u16;
+
+                let vx_vy = rx + ry;
+
+                if vx_vy > 0xFF {
+                    self.registers[0xF] = 1;
+                    let lower = vx_vy & 0x00FF;
+                    self.registers[vx as usize] = lower as u8;
+                } else {
+                    self.registers[0xF] = 0;
+                    self.registers[vx as usize] = vx_vy as u8;
+                }
+            }
             Instructions::ShlVxVy => todo!(),
             Instructions::SubnVxVy => todo!(),
             Instructions::ShrVxVy => todo!(),
-            Instructions::AddVxVy => todo!(),
             Instructions::SubVxVy => todo!(),
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
@@ -347,4 +370,68 @@ mod tests {
         cpu.cycle();
         assert_eq!(cpu.registers[vx as usize], kk + 1);
     }
+    #[test]
+    fn instruction_ld_vx_vy_loads_registers() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x50;
+        cpu.registers[vx as usize] = 0x0001;
+        cpu.registers[(vy >> 4) as usize] = 0x0002;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[vx as usize], 0x0002);
+    }
+    #[test]
+    fn instruction_ors_vx_vy_registers() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x51;
+        cpu.registers[vx as usize] = 0x0001;
+        cpu.registers[(vy >> 4) as usize] = 0x0002;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[vx as usize], 0x0003);
+    }
+    #[test]
+    fn instruction_and_vx_vy_registers() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x52;
+        cpu.registers[vx as usize] = 0x0001;
+        cpu.registers[(vy >> 4) as usize] = 0x0001;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[vx as usize], 0x0001);
+    }
+    #[test]
+    fn instruction_xor_vx_vy_registers() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x53;
+        cpu.registers[vx as usize] = 0x0001;
+        cpu.registers[(vy >> 4) as usize] = 0x0000;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[vx as usize], 0x0003);
+    }
+    #[test]
+    fn instruction_add_vx_vy_registers() {
+        todo!()
+    }
+    #[test]
+    fn instruction_add_vx_vy_registers_with_carry() {
+        todo!()
+    }
 }
+
+// Debug Hex Print
+// let hex_v = format!("{:X}", instruction);
+// print!("{hex_v}\n");
