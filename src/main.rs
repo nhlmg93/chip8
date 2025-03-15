@@ -337,8 +337,8 @@ mod tests {
         let mut cpu = Chip8::new();
         let vx = 0x0A;
         let vy = 0x50;
-        cpu.registers[vx as usize] = 0x0001;
-        cpu.registers[(vy >> 4) as usize] = 0x0001;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.registers[(vy >> 4) as usize] = 0x01;
         cpu.memory[PROG_MEM_MIN] = 0x50 | vx;
         cpu.memory[PROG_MEM_MIN + 1] = vy;
         cpu.cycle();
@@ -363,7 +363,7 @@ mod tests {
         let vx = 0x09;
         let kk = 0x01;
 
-        cpu.registers[vx as usize] = 0x0001;
+        cpu.registers[vx as usize] = 0x01;
         cpu.memory[PROG_MEM_MIN] = 0x70 | vx;
         cpu.memory[PROG_MEM_MIN + 1] = kk;
 
@@ -375,60 +375,81 @@ mod tests {
         let mut cpu = Chip8::new();
         let vx = 0x09;
         let vy = 0x50;
-        cpu.registers[vx as usize] = 0x0001;
-        cpu.registers[(vy >> 4) as usize] = 0x0002;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.registers[(vy >> 4) as usize] = 0x02;
         cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
         cpu.memory[PROG_MEM_MIN + 1] = vy;
 
         cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x0002);
+        assert_eq!(cpu.registers[vx as usize], 0x02);
     }
     #[test]
-    fn instruction_ors_vx_vy_registers() {
+    fn instruction_or_vx_vy_registers() {
         let mut cpu = Chip8::new();
         let vx = 0x09;
         let vy = 0x51;
-        cpu.registers[vx as usize] = 0x0001;
-        cpu.registers[(vy >> 4) as usize] = 0x0002;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.registers[(vy >> 4) as usize] = 0x02;
         cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
         cpu.memory[PROG_MEM_MIN + 1] = vy;
 
         cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x0003);
+        assert_eq!(cpu.registers[vx as usize], 0x03);
     }
     #[test]
     fn instruction_and_vx_vy_registers() {
         let mut cpu = Chip8::new();
         let vx = 0x09;
         let vy = 0x52;
-        cpu.registers[vx as usize] = 0x0001;
-        cpu.registers[(vy >> 4) as usize] = 0x0001;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.registers[(vy >> 4) as usize] = 0x01;
         cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
         cpu.memory[PROG_MEM_MIN + 1] = vy;
 
         cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x0001);
+        assert_eq!(cpu.registers[vx as usize], 0x01);
     }
     #[test]
     fn instruction_xor_vx_vy_registers() {
         let mut cpu = Chip8::new();
         let vx = 0x09;
         let vy = 0x53;
-        cpu.registers[vx as usize] = 0x0001;
-        cpu.registers[(vy >> 4) as usize] = 0x0000;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.registers[(vy >> 4) as usize] = 0x00;
         cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
         cpu.memory[PROG_MEM_MIN + 1] = vy;
 
         cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x0003);
+        assert_eq!(cpu.registers[vx as usize], 0x01);
     }
     #[test]
     fn instruction_add_vx_vy_registers() {
-        todo!()
+        //if there is a bug it is probably here
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x54;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.registers[(vy >> 4) as usize] = 0x01;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[vx as usize], 0x02);
     }
     #[test]
     fn instruction_add_vx_vy_registers_with_carry() {
-        todo!()
+        //if there is a bug it is probably here
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x54;
+        cpu.registers[vx as usize] = 0xFF;
+        cpu.registers[(vy >> 4) as usize] = 0x01;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 1);
+        assert_eq!(cpu.registers[vx as usize], 0x00);
     }
 }
 
