@@ -205,21 +205,37 @@ impl Chip8 {
                 let rx = self.registers[vx as usize] as u16;
                 let ry = self.registers[vy as usize] as u16;
 
-                let vx_vy = rx + ry;
+                let result = rx + ry;
 
-                if vx_vy > 0xFF {
+                if result > 0xFF {
                     self.registers[0xF] = 1;
-                    let lower = vx_vy & 0x00FF;
+                    let lower = result & 0x00FF;
                     self.registers[vx as usize] = lower as u8;
                 } else {
                     self.registers[0xF] = 0;
-                    self.registers[vx as usize] = vx_vy as u8;
+                    self.registers[vx as usize] = result as u8;
                 }
             }
+            Instructions::SubVxVy => {
+                print!("subvxvy");
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+
+                let rx = self.registers[vx as usize];
+                let ry = self.registers[vy as usize];
+
+                if rx >= ry {
+                    self.registers[0xF] = 1;
+                } else {
+                    self.registers[0xF] = 0;
+                }
+
+                self.registers[vx as usize] -= ry;
+            }
             Instructions::ShlVxVy => todo!(),
-            Instructions::SubnVxVy => todo!(),
             Instructions::ShrVxVy => todo!(),
-            Instructions::SubVxVy => todo!(),
+            Instructions::SubnVxVy => todo!(),
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
     }
@@ -434,6 +450,7 @@ mod tests {
         cpu.memory[PROG_MEM_MIN + 1] = vy;
 
         cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 0);
         assert_eq!(cpu.registers[vx as usize], 0x02);
     }
     #[test]
@@ -450,6 +467,24 @@ mod tests {
         cpu.cycle();
         assert_eq!(cpu.registers[0xF], 1);
         assert_eq!(cpu.registers[vx as usize], 0x00);
+    }
+    #[test]
+    fn instruction_sub_vx_vy_registers() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x55;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.registers[(vy >> 4) as usize] = 0x01;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 1);
+        assert_eq!(cpu.registers[vx as usize], 0x00);
+    }
+    #[test]
+    fn instruction_sub_vx_vy_registers_with_carry() {
+        todo!()
     }
 }
 
