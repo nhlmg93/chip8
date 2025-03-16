@@ -202,22 +202,14 @@ impl Chip8 {
                 let vx = ((opcode | operands) & 0x0F00) >> 8;
                 let vy = ((opcode | operands) & 0x00F0) >> 4;
 
-                let rx = self.registers[vx as usize] as u16;
-                let ry = self.registers[vy as usize] as u16;
+                let rx = self.registers[vx as usize];
+                let ry = self.registers[vy as usize];
 
-                let result = rx + ry;
-
-                if result > 0xFF {
-                    self.registers[0xF] = 1;
-                    let lower = result & 0x00FF;
-                    self.registers[vx as usize] = lower as u8;
-                } else {
-                    self.registers[0xF] = 0;
-                    self.registers[vx as usize] = result as u8;
-                }
+                let (result, overflow) = rx.overflowing_add(ry);
+                self.registers[0xF] = if overflow { 1 } else { 0 };
+                self.registers[vx as usize] = result;
             }
             Instructions::SubVxVy => {
-                print!("subvxvy");
                 self.increment_pc();
                 let vx = ((opcode | operands) & 0x0F00) >> 8;
                 let vy = ((opcode | operands) & 0x00F0) >> 4;
@@ -225,13 +217,9 @@ impl Chip8 {
                 let rx = self.registers[vx as usize];
                 let ry = self.registers[vy as usize];
 
-                if rx >= ry {
-                    self.registers[0xF] = 1;
-                } else {
-                    self.registers[0xF] = 0;
-                }
+                self.registers[0xF] = if rx >= ry { 1 } else { 0 };
 
-                self.registers[vx as usize] -= ry;
+                self.registers[vx as usize] = rx.wrapping_sub(ry);
             }
             Instructions::ShlVxVy => todo!(),
             Instructions::ShrVxVy => todo!(),
@@ -248,7 +236,7 @@ impl Chip8 {
     }
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     let mut cpu = Chip8::new();
     cpu.load_rom("chip8-test-rom/test_opcode.ch8");
 
@@ -266,6 +254,7 @@ fn main() {
             //TODO: Scale and display graphics
         }
     */
+    Ok(())
 }
 
 #[cfg(test)]
@@ -484,7 +473,17 @@ mod tests {
     }
     #[test]
     fn instruction_sub_vx_vy_registers_with_carry() {
-        todo!()
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        let vy = 0x55;
+        cpu.registers[vx as usize] = 0x00;
+        cpu.registers[(vy >> 4) as usize] = 0x01;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = vy;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 0);
+        assert_eq!(cpu.registers[vx as usize], 0xFF);
     }
 }
 
