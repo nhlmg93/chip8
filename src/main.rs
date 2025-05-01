@@ -221,9 +221,44 @@ impl Chip8 {
 
                 self.registers[vx as usize] = rx.wrapping_sub(ry);
             }
-            Instructions::ShlVxVy => todo!(),
-            Instructions::ShrVxVy => todo!(),
-            Instructions::SubnVxVy => todo!(),
+            Instructions::ShlVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+
+                let rx = self.registers[vx as usize];
+                let ry = self.registers[vy as usize];
+
+                let (result, overflow) = rx.overflowing_shl(ry as u32);
+                self.registers[0xF] = if overflow { 1 } else { 0 };
+                self.registers[vx as usize] = result;
+            }
+            Instructions::ShrVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+
+                let rx = self.registers[vx as usize];
+                let ry = self.registers[vy as usize];
+                todo!("test this");
+
+                let (result, overflow) = rx.overflowing_shr(ry as u32);
+                self.registers[0xF] = if overflow { 1 } else { 0 };
+                self.registers[vx as usize] = result;
+            }
+            Instructions::SubnVxVy => {
+                self.increment_pc();
+                let vx = ((opcode | operands) & 0x0F00) >> 8;
+                let vy = ((opcode | operands) & 0x00F0) >> 4;
+
+                let rx = self.registers[vx as usize];
+                let ry = self.registers[vy as usize];
+
+                todo!("test this");
+                let (result, overflow) = rx.overflowing_sub(ry);
+                self.registers[0xF] = if overflow { 1 } else { 0 };
+                self.registers[vx as usize] = result;
+            }
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
     }
