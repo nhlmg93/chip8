@@ -225,14 +225,13 @@ impl Chip8 {
                 self.increment_pc();
                 let vx = ((opcode | operands) & 0x0F00) >> 8;
 
-                let rx = self.registers[vx as usize];
+                let mut rx = self.registers[vx as usize];
 
-                let hex_v = format!("{:X}", rx);
-                println!("{hex_v}");
+                let msb = rx & 0x80;
+                rx = rx << 1;
 
-                let (result, overflow) = rx.overflowing_shl(1);
-                self.registers[0xF] = if overflow { 1 } else { 0 };
-                self.registers[vx as usize] = result;
+                self.registers[0xF] = if msb != 0 { 0x01 } else { 0x00 };
+                self.registers[vx as usize] = rx;
             }
             Instructions::ShrVxVy => {
                 self.increment_pc();
@@ -257,7 +256,7 @@ impl Chip8 {
 
                 todo!("test this");
                 let (result, overflow) = rx.overflowing_sub(ry);
-                self.registers[0xF] = if overflow { 1 } else { 0 };
+                self.registers[0xF] = if overflow { 0x1 } else { 0x0 };
                 self.registers[vx as usize] = result;
             }
             Instructions::Undefined => panic!("Instruction Undefined"),
@@ -480,7 +479,6 @@ mod tests {
     }
     #[test]
     fn instruction_add_vx_vy_registers_with_carry() {
-        //if there is a bug it is probably here
         let mut cpu = Chip8::new();
         let vx = 0x09;
         let vy = 0x54;
@@ -532,6 +530,18 @@ mod tests {
         cpu.cycle();
         assert_eq!(cpu.registers[0xF], 0);
         assert_eq!(cpu.registers[vx as usize], 0x02);
+    }
+    #[test]
+    fn instruction_shl_vx_vy_overflow() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        cpu.registers[vx as usize] = 0xFF;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = 0x0E;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 1);
+        assert_eq!(cpu.registers[vx as usize], 0xFE);
     }
 }
 
