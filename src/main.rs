@@ -224,12 +224,13 @@ impl Chip8 {
             Instructions::ShlVxVy => {
                 self.increment_pc();
                 let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
 
                 let rx = self.registers[vx as usize];
-                let ry = self.registers[vy as usize];
 
-                let (result, overflow) = rx.overflowing_shl(ry as u32);
+                let hex_v = format!("{:X}", rx);
+                println!("{hex_v}");
+
+                let (result, overflow) = rx.overflowing_shl(1);
                 self.registers[0xF] = if overflow { 1 } else { 0 };
                 self.registers[vx as usize] = result;
             }
@@ -519,6 +520,18 @@ mod tests {
         cpu.cycle();
         assert_eq!(cpu.registers[0xF], 0);
         assert_eq!(cpu.registers[vx as usize], 0xFF);
+    }
+    #[test]
+    fn instruction_shl_vx_vy() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = 0x0E;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 0);
+        assert_eq!(cpu.registers[vx as usize], 0x02);
     }
 }
 
