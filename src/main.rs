@@ -236,15 +236,14 @@ impl Chip8 {
             Instructions::ShrVxVy => {
                 self.increment_pc();
                 let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
 
-                let rx = self.registers[vx as usize];
-                let ry = self.registers[vy as usize];
-                todo!("test this");
+                let mut rx = self.registers[vx as usize];
 
-                let (result, overflow) = rx.overflowing_shr(ry as u32);
-                self.registers[0xF] = if overflow { 1 } else { 0 };
-                self.registers[vx as usize] = result;
+                let lsb = rx & 1;
+                rx = rx >> 1;
+
+                self.registers[0xF] = if lsb != 0 { 0x01 } else { 0x00 };
+                self.registers[vx as usize] = rx;
             }
             Instructions::SubnVxVy => {
                 self.increment_pc();
@@ -254,10 +253,8 @@ impl Chip8 {
                 let rx = self.registers[vx as usize];
                 let ry = self.registers[vy as usize];
 
-                todo!("test this");
-                let (result, overflow) = rx.overflowing_sub(ry);
-                self.registers[0xF] = if overflow { 0x1 } else { 0x0 };
-                self.registers[vx as usize] = result;
+                self.registers[0xF] = if ry > rx { 0x01 } else { 0x00 };
+                self.registers[vx as usize] = ry - rx;
             }
             Instructions::Undefined => panic!("Instruction Undefined"),
         }
@@ -542,6 +539,30 @@ mod tests {
         cpu.cycle();
         assert_eq!(cpu.registers[0xF], 1);
         assert_eq!(cpu.registers[vx as usize], 0xFE);
+    }
+    #[test]
+    fn instruction_shr_vx_vy() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        cpu.registers[vx as usize] = 0x06;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = 0x06;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 0);
+        assert_eq!(cpu.registers[vx as usize], 0x03);
+    }
+    #[test]
+    fn instruction_shr_vx_vy_overflow() {
+        let mut cpu = Chip8::new();
+        let vx = 0x09;
+        cpu.registers[vx as usize] = 0x01;
+        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
+        cpu.memory[PROG_MEM_MIN + 1] = 0x06;
+
+        cpu.cycle();
+        assert_eq!(cpu.registers[0xF], 1);
+        assert_eq!(cpu.registers[vx as usize], 0x00);
     }
 }
 
