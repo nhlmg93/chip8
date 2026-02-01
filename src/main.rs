@@ -1,24 +1,17 @@
-//use raylib::prelude::*;
+use raylib::prelude::*;
+use std::fs;
+use std::path::Path;
 
-use core::panic;
-use std::{fs, path::Path, usize};
+const MEMORY_SIZE: usize = 4096;
+const DISPLAY_WIDTH: usize = 64;
+const DISPLAY_HEIGHT: usize = 32;
+const NUM_REGISTERS: usize = 16;
+const STACK_SIZE: usize = 16;
+const NUM_KEYS: usize = 16;
+const FONT_SET_SIZE: usize = 80;
+const PROGRAM_START: usize = 0x200;
 
-#[derive(Debug)]
-#[allow(dead_code)] //TODO: remove
-pub struct Chip8 {
-    memory: [u8; 4095],
-    graphics: [u8; 64 * 32],
-    registers: [u8; 16],
-    index: u16,
-    program_counter: u16,
-    delay_timer: u8,
-    sound_timer: u8,
-    stack: [u16; 16],
-    sp: u16,
-    keys: [u8; 16],
-}
-
-const FONT_SET: [u8; 80] = [
+const FONT_SET: [u8; FONT_SET_SIZE] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
     0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
@@ -37,535 +30,339 @@ const FONT_SET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 
-const PROG_MEM_MIN: usize = 0x200;
-const PROG_MEM_MAX: usize = 0xFFF;
-
-#[repr(u16)]
-enum Instructions {
-    Cls = 0x00E0,
-    Ret = 0x00EE,
-    Jp = 0x1,
-    Call = 0x2,
-    SeVxByte = 0x3,
-    SneVxByte = 0x4,
-    SneVxVy = 0x5,
-    LdVxByte = 0x6,
-    AddVxByte = 0x7,
-    LdVxVy = 0x8000,
-    OrVxVy = 0x8001,
-    AndVxVy = 0x8002,
-    XorVxVy = 0x8003,
-    AddVxVy = 0x8004,
-    SubVxVy = 0x8005,
-    ShrVxVy = 0x8006,
-    SubnVxVy = 0x8007,
-    ShlVxVy = 0x800E,
-    Undefined,
+pub struct Chip8 {
+    memory: [u8; MEMORY_SIZE],
+    display: [bool; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+    registers: [u8; NUM_REGISTERS],
+    index: u16,
+    pc: u16,
+    delay_timer: u8,
+    sound_timer: u8,
+    stack: [u16; STACK_SIZE],
+    sp: u8,
+    keys: [bool; NUM_KEYS],
+    draw_flag: bool,
+    waiting_for_key: Option<usize>,
 }
-impl From<u16> for Instructions {
-    fn from(instruction: u16) -> Self {
-        let msb = (instruction & 0xF000) >> 12;
-        match msb {
-            0x0 => match instruction {
-                0x00E0 => Instructions::Cls,
-                0x00EE => Instructions::Ret,
-                _ => Instructions::Undefined,
-            },
-            0x1 => Instructions::Jp,
-            0x2 => Instructions::Call,
-            0x3 => Instructions::SeVxByte,
-            0x4 => Instructions::SneVxByte,
-            0x5 => Instructions::SneVxVy,
-            0x6 => Instructions::LdVxByte,
-            0x7 => Instructions::AddVxByte,
-            0x8 => {
-                let lsb = instruction & 0x000F;
-                match lsb {
-                    0x0 => Instructions::LdVxVy,
-                    0x1 => Instructions::OrVxVy,
-                    0x2 => Instructions::AndVxVy,
-                    0x3 => Instructions::XorVxVy,
-                    0x4 => Instructions::AddVxVy,
-                    0x5 => Instructions::SubVxVy,
-                    0x6 => Instructions::ShrVxVy,
-                    0x7 => Instructions::SubnVxVy,
-                    0xE => Instructions::ShlVxVy,
-                    _ => Instructions::Undefined,
-                }
-            }
-            _ => Instructions::Undefined,
-        }
+
+impl Default for Chip8 {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-#[allow(dead_code)] //TODO: remove
 impl Chip8 {
-    fn new() -> Self {
-        let mut memory = [0; 4095];
-
-        memory[..FONT_SET.len()].copy_from_slice(&FONT_SET);
+    pub fn new() -> Self {
+        let mut memory = [0; MEMORY_SIZE];
+        memory[..FONT_SET_SIZE].copy_from_slice(&FONT_SET);
 
         Self {
             memory,
-            graphics: [0; 64 * 32],
-            registers: [0; 16],
+            display: [false; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+            registers: [0; NUM_REGISTERS],
             index: 0,
-            program_counter: 0x200,
+            pc: PROGRAM_START as u16,
             delay_timer: 0,
             sound_timer: 0,
-            stack: [0; 16],
+            stack: [0; STACK_SIZE],
             sp: 0,
-            keys: [0; 16],
+            keys: [false; NUM_KEYS],
+            draw_flag: false,
+            waiting_for_key: None,
         }
     }
-    fn increment_pc(&mut self) {
-        self.program_counter += 2
+
+    pub fn load_rom<P: AsRef<Path>>(&mut self, path: P) -> Result<(), String> {
+        let rom = fs::read(path).map_err(|e| format!("Failed to read ROM: {}", e))?;
+        let len = rom.len().min(MEMORY_SIZE - PROGRAM_START);
+        self.memory[PROGRAM_START..PROGRAM_START + len].copy_from_slice(&rom[..len]);
+        Ok(())
     }
-    fn cycle(&mut self) {
-        let opcode = (self.memory[self.program_counter as usize] as u16) << 8;
-        let operands = self.memory[self.program_counter as usize + 1] as u16;
-        let instruction = Instructions::from(opcode | operands);
-        match instruction {
-            Instructions::Cls => self.graphics.iter_mut().for_each(|pixel| *pixel = 0),
-            Instructions::Ret => {
-                self.program_counter = self.stack[self.sp as usize];
+
+    pub fn set_key(&mut self, key: usize, pressed: bool) {
+        if key < NUM_KEYS {
+            self.keys[key] = pressed;
+        }
+    }
+
+    pub fn get_display(&self) -> &[bool] {
+        &self.display
+    }
+
+    pub fn should_draw(&self) -> bool {
+        self.draw_flag
+    }
+
+    pub fn clear_draw_flag(&mut self) {
+        self.draw_flag = false;
+    }
+
+    pub fn cycle(&mut self) {
+        if let Some(vx) = self.waiting_for_key {
+            for (i, &pressed) in self.keys.iter().enumerate() {
+                if pressed {
+                    self.registers[vx] = i as u8;
+                    self.waiting_for_key = None;
+                    self.pc += 2;
+                    break;
+                }
+            }
+            return;
+        }
+
+        let opcode = ((self.memory[self.pc as usize] as u16) << 8)
+            | (self.memory[self.pc as usize + 1] as u16);
+        self.pc += 2;
+
+        let nibble = |shift: u16| ((opcode >> shift) & 0xF) as usize;
+        let byte = || (opcode & 0xFF) as u8;
+        let addr = || opcode & 0xFFF;
+
+        match (opcode >> 12, nibble(8), nibble(4), nibble(0)) {
+            (0x0, 0x0, 0xE, 0x0) => self.display.iter_mut().for_each(|p| *p = false),
+            (0x0, 0x0, 0xE, 0xE) => {
                 self.sp -= 1;
+                self.pc = self.stack[self.sp as usize];
             }
-            Instructions::Jp => self.program_counter = (opcode | operands) & 0x0FFF,
-            Instructions::Call => {
+            (0x1, _, _, _) => self.pc = addr(),
+            (0x2, _, _, _) => {
+                self.stack[self.sp as usize] = self.pc;
                 self.sp += 1;
-                self.stack[self.sp as usize] = self.program_counter;
-                self.program_counter = (opcode | operands) & 0x0FFF
+                self.pc = addr();
             }
-            Instructions::SeVxByte => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let kk = (opcode | operands) & 0x00FF;
-                if self.registers[vx as usize] == kk as u8 {
-                    self.increment_pc()
+            (0x3, x, _, _) => {
+                if self.registers[x] == byte() {
+                    self.pc += 2;
                 }
             }
-            Instructions::SneVxByte => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let kk = (opcode | operands) & 0x00FF;
-                if self.registers[vx as usize] != kk as u8 {
-                    self.increment_pc()
+            (0x4, x, _, _) => {
+                if self.registers[x] != byte() {
+                    self.pc += 2;
                 }
             }
-            Instructions::SneVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-                if self.registers[vx as usize] == self.registers[vy as usize] {
-                    self.increment_pc();
+            (0x5, x, y, 0x0) => {
+                if self.registers[x] == self.registers[y] {
+                    self.pc += 2;
                 }
             }
-            Instructions::LdVxByte => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let kk = (opcode | operands) & 0x00FF;
-                self.registers[vx as usize] = kk as u8;
+            (0x6, x, _, _) => self.registers[x] = byte(),
+            (0x7, x, _, _) => self.registers[x] = self.registers[x].wrapping_add(byte()),
+            (0x8, x, y, 0x0) => self.registers[x] = self.registers[y],
+            (0x8, x, y, 0x1) => self.registers[x] |= self.registers[y],
+            (0x8, x, y, 0x2) => self.registers[x] &= self.registers[y],
+            (0x8, x, y, 0x3) => self.registers[x] ^= self.registers[y],
+            (0x8, x, y, 0x4) => {
+                let (res, carry) = self.registers[x].overflowing_add(self.registers[y]);
+                self.registers[0xF] = carry as u8;
+                self.registers[x] = res;
             }
-            Instructions::AddVxByte => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let kk = (opcode | operands) & 0x00FF;
-                self.registers[vx as usize] += kk as u8;
+            (0x8, x, y, 0x5) => {
+                self.registers[0xF] = (self.registers[x] >= self.registers[y]) as u8;
+                self.registers[x] = self.registers[x].wrapping_sub(self.registers[y]);
             }
-            Instructions::LdVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-                self.registers[vx as usize] = self.registers[vy as usize];
+            (0x8, x, _, 0x6) => {
+                self.registers[0xF] = self.registers[x] & 1;
+                self.registers[x] >>= 1;
             }
-            Instructions::OrVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-                self.registers[vx as usize] |= self.registers[vy as usize];
+            (0x8, x, y, 0x7) => {
+                self.registers[0xF] = (self.registers[y] >= self.registers[x]) as u8;
+                self.registers[x] = self.registers[y].wrapping_sub(self.registers[x]);
             }
-            Instructions::AndVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-                self.registers[vx as usize] &= self.registers[vy as usize];
+            (0x8, x, _, 0xE) => {
+                self.registers[0xF] = (self.registers[x] >> 7) & 1;
+                self.registers[x] <<= 1;
             }
-            Instructions::XorVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-                self.registers[vx as usize] ^= self.registers[vy as usize];
+            (0x9, x, y, 0x0) => {
+                if self.registers[x] != self.registers[y] {
+                    self.pc += 2;
+                }
             }
-            Instructions::AddVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-
-                let rx = self.registers[vx as usize];
-                let ry = self.registers[vy as usize];
-
-                let (result, overflow) = rx.overflowing_add(ry);
-                self.registers[0xF] = if overflow { 1 } else { 0 };
-                self.registers[vx as usize] = result;
+            (0xA, _, _, _) => self.index = addr(),
+            (0xB, _, _, _) => self.pc = addr() + self.registers[0] as u16,
+            (0xC, x, _, _) => self.registers[x] = rand::random::<u8>() & byte(),
+            (0xD, x, y, n) => self.draw(x, y, n),
+            (0xE, x, 0x9, 0xE) => {
+                if self.keys[self.registers[x] as usize & 0xF] {
+                    self.pc += 2;
+                }
             }
-            Instructions::SubVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-
-                let rx = self.registers[vx as usize];
-                let ry = self.registers[vy as usize];
-
-                self.registers[0xF] = if rx >= ry { 1 } else { 0 };
-
-                self.registers[vx as usize] = rx.wrapping_sub(ry);
+            (0xE, x, 0xA, 0x1) => {
+                if !self.keys[self.registers[x] as usize & 0xF] {
+                    self.pc += 2;
+                }
             }
-            Instructions::ShlVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-
-                let mut rx = self.registers[vx as usize];
-
-                let msb = rx & 0x80;
-                rx = rx << 1;
-
-                self.registers[0xF] = if msb != 0 { 0x01 } else { 0x00 };
-                self.registers[vx as usize] = rx;
+            (0xF, x, 0x0, 0x7) => self.registers[x] = self.delay_timer,
+            (0xF, x, 0x0, 0xA) => self.waiting_for_key = Some(x),
+            (0xF, x, 0x1, 0x5) => self.delay_timer = self.registers[x],
+            (0xF, x, 0x1, 0x8) => self.sound_timer = self.registers[x],
+            (0xF, x, 0x1, 0xE) => {
+                let (new_index, overflow) = self.index.overflowing_add(self.registers[x] as u16);
+                self.index = new_index;
+                if overflow {
+                    self.registers[0xF] = 1;
+                }
             }
-            Instructions::ShrVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-
-                let mut rx = self.registers[vx as usize];
-
-                let lsb = rx & 1;
-                rx = rx >> 1;
-
-                self.registers[0xF] = if lsb != 0 { 0x01 } else { 0x00 };
-                self.registers[vx as usize] = rx;
+            (0xF, x, 0x2, 0x9) => self.index = (self.registers[x] as u16 & 0xF) * 5,
+            (0xF, x, 0x3, 0x3) => {
+                let val = self.registers[x];
+                self.memory[self.index as usize] = val / 100;
+                self.memory[self.index as usize + 1] = (val / 10) % 10;
+                self.memory[self.index as usize + 2] = val % 10;
             }
-            Instructions::SubnVxVy => {
-                self.increment_pc();
-                let vx = ((opcode | operands) & 0x0F00) >> 8;
-                let vy = ((opcode | operands) & 0x00F0) >> 4;
-
-                let rx = self.registers[vx as usize];
-                let ry = self.registers[vy as usize];
-
-                self.registers[0xF] = if ry > rx { 0x01 } else { 0x00 };
-                self.registers[vx as usize] = ry - rx;
+            (0xF, x, 0x5, 0x5) => {
+                for i in 0..=x {
+                    self.memory[self.index as usize + i] = self.registers[i];
+                }
             }
-            Instructions::Undefined => panic!("Instruction Undefined"),
+            (0xF, x, 0x6, 0x5) => {
+                for i in 0..=x {
+                    self.registers[i] = self.memory[self.index as usize + i];
+                }
+            }
+            _ => panic!(
+                "Unknown opcode: 0x{:04X} at PC: 0x{:04X}",
+                opcode,
+                self.pc - 2
+            ),
         }
     }
-    fn load_rom<P: AsRef<Path>>(&mut self, file: P) {
-        let rom = fs::read(file).expect("File not found.");
-        rom.iter()
-            .enumerate()
-            .take_while(|(i, _)| (*i + PROG_MEM_MIN) < PROG_MEM_MAX)
-            .for_each(|(i, &b)| self.memory[i + PROG_MEM_MIN] = b)
+
+    fn draw(&mut self, x: usize, y: usize, n: usize) {
+        let x_pos = self.registers[x] as usize % DISPLAY_WIDTH;
+        let y_pos = self.registers[y] as usize % DISPLAY_HEIGHT;
+        self.registers[0xF] = 0;
+
+        for row in 0..n {
+            let sprite = self.memory[self.index as usize + row];
+            let py = (y_pos + row) % DISPLAY_HEIGHT;
+            for col in 0..8 {
+                let px = (x_pos + col) % DISPLAY_WIDTH;
+                let pixel = (sprite >> (7 - col)) & 1;
+                if pixel == 1 {
+                    let idx = py * DISPLAY_WIDTH + px;
+                    if self.display[idx] {
+                        self.registers[0xF] = 1;
+                    }
+                    self.display[idx] ^= true;
+                }
+            }
+        }
+        self.draw_flag = true;
+    }
+
+    pub fn update_timers(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
     }
 }
 
-fn main() -> Result<(), String> {
+const SCALE: usize = 15;
+const WINDOW_WIDTH: i32 = (DISPLAY_WIDTH * SCALE) as i32;
+const WINDOW_HEIGHT: i32 = (DISPLAY_HEIGHT * SCALE) as i32;
+const CYCLES_PER_FRAME: usize = 10;
+
+fn get_chip8_key(key: KeyboardKey) -> Option<usize> {
+    match key {
+        KeyboardKey::KEY_X => Some(0x0),
+        KeyboardKey::KEY_ONE => Some(0x1),
+        KeyboardKey::KEY_TWO => Some(0x2),
+        KeyboardKey::KEY_THREE => Some(0x3),
+        KeyboardKey::KEY_Q => Some(0x4),
+        KeyboardKey::KEY_W => Some(0x5),
+        KeyboardKey::KEY_E => Some(0x6),
+        KeyboardKey::KEY_A => Some(0x7),
+        KeyboardKey::KEY_S => Some(0x8),
+        KeyboardKey::KEY_D => Some(0x9),
+        KeyboardKey::KEY_Z => Some(0xA),
+        KeyboardKey::KEY_C => Some(0xB),
+        KeyboardKey::KEY_FOUR => Some(0xC),
+        KeyboardKey::KEY_R => Some(0xD),
+        KeyboardKey::KEY_F => Some(0xE),
+        KeyboardKey::KEY_V => Some(0xF),
+        _ => None,
+    }
+}
+
+fn main() {
     let mut cpu = Chip8::new();
-    cpu.load_rom("chip8-test-rom/test_opcode.ch8");
+    if let Err(e) = cpu.load_rom("chip8-test-rom/test_opcode.ch8") {
+        eprintln!("Error: {}", e);
+        return;
+    }
 
-    //TODO: load ROM
-    /*
-        let (mut rl, thread) = raylib::init()
-            .size(640, 480)
-            .title("Chip8 Emulator")
-            .build();
+    let (mut rl, thread) = raylib::init()
+        .size(WINDOW_WIDTH, WINDOW_HEIGHT)
+        .title("CHIP-8 Emulator")
+        .build();
 
-        while !rl.window_should_close() {
-            let mut d = rl.begin_drawing(&thread);
+    rl.set_target_fps(60);
 
-            d.clear_background(Color::BLACK);
-            //TODO: Scale and display graphics
+    while !rl.window_should_close() {
+        // Handle input
+        if let Some(key) = rl.get_key_pressed() {
+            if let Some(chip8_key) = get_chip8_key(key) {
+                cpu.set_key(chip8_key, true);
+            }
         }
-    */
-    Ok(())
+
+        // Check for key releases (poll all mapped keys)
+        let mapped_keys = [
+            KeyboardKey::KEY_X,
+            KeyboardKey::KEY_ONE,
+            KeyboardKey::KEY_TWO,
+            KeyboardKey::KEY_THREE,
+            KeyboardKey::KEY_Q,
+            KeyboardKey::KEY_W,
+            KeyboardKey::KEY_E,
+            KeyboardKey::KEY_A,
+            KeyboardKey::KEY_S,
+            KeyboardKey::KEY_D,
+            KeyboardKey::KEY_Z,
+            KeyboardKey::KEY_C,
+            KeyboardKey::KEY_FOUR,
+            KeyboardKey::KEY_R,
+            KeyboardKey::KEY_F,
+            KeyboardKey::KEY_V,
+        ];
+        for key in mapped_keys.iter() {
+            if let Some(chip8_key) = get_chip8_key(*key) {
+                cpu.set_key(chip8_key, rl.is_key_down(*key));
+            }
+        }
+
+        // Run CPU cycles
+        for _ in 0..CYCLES_PER_FRAME {
+            cpu.cycle();
+        }
+
+        // Update timers at 60Hz (once per frame)
+        cpu.update_timers();
+
+        // Render
+        let mut d = rl.begin_drawing(&thread);
+        d.clear_background(Color::BLACK);
+
+        let display = cpu.get_display();
+        for y in 0..DISPLAY_HEIGHT {
+            for x in 0..DISPLAY_WIDTH {
+                let idx = y * DISPLAY_WIDTH + x;
+                if display[idx] {
+                    let screen_x = (x * SCALE) as i32;
+                    let screen_y = (y * SCALE) as i32;
+                    let width = SCALE as i32;
+                    let height = SCALE as i32;
+                    d.draw_rectangle(screen_x, screen_y, width, height, Color::WHITE);
+                }
+            }
+        }
+
+        cpu.clear_draw_flag();
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn font_set_loads_into_memory() {
-        let cpu = Chip8::new();
-        cpu.memory
-            .iter()
-            .enumerate()
-            .take_while(|(i, _)| *i < FONT_SET.len() && *i < PROG_MEM_MIN)
-            .for_each(|(i, &b)| assert_eq!(b, FONT_SET[i]));
-    }
-    #[test]
-    fn loads_rom_into_memory() {
-        let mut cpu = Chip8::new();
-        let path = "chip8-test-rom/test_opcode.ch8";
-        let rom_bytes = fs::read(path).expect("File not found.");
-
-        cpu.load_rom(path.to_string());
-
-        rom_bytes
-            .iter()
-            .enumerate()
-            .for_each(|(i, &b)| assert_eq!(b, cpu.memory[PROG_MEM_MIN + i]));
-    }
-    #[test]
-    fn instruction_cls_clears_the_screen() {
-        let mut cpu = Chip8::new();
-        cpu.graphics.iter_mut().for_each(|byte| *byte = 1);
-        cpu.memory[PROG_MEM_MIN] = 0x00;
-        cpu.memory[PROG_MEM_MIN + 1] = 0xE0;
-        cpu.cycle();
-
-        cpu.graphics.iter().for_each(|b| assert_eq!(*b, 0))
-    }
-
-    #[test]
-    fn instruction_jp_jumps_to_address() {
-        let mut cpu = Chip8::new();
-        cpu.memory[PROG_MEM_MIN] = 0x13;
-        cpu.memory[PROG_MEM_MIN + 1] = 0x00;
-        cpu.cycle();
-        assert_eq!(cpu.program_counter, 0x300);
-    }
-
-    #[test]
-    fn instruction_call_calls_subroutine() {
-        let mut cpu = Chip8::new();
-        cpu.memory[PROG_MEM_MIN] = 0x23;
-        cpu.memory[PROG_MEM_MIN + 1] = 0x00;
-        cpu.cycle();
-        assert_eq!(cpu.sp, 1);
-        assert_eq!(cpu.stack[cpu.sp as usize], 0x200);
-        assert_eq!(cpu.program_counter, 0x300);
-    }
-
-    #[test]
-    fn instruction_se_vx_byte_skips_next_instruction_when_eq() {
-        let mut cpu = Chip8::new();
-        let vx = 0x0A;
-        let kk = 0x05;
-        cpu.memory[PROG_MEM_MIN] = 0x30 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = kk;
-        cpu.registers[vx as usize] = kk;
-        cpu.cycle();
-        assert_eq!(cpu.program_counter, 0x0204);
-    }
-
-    #[test]
-    fn instruction_sne_vx_byte_skips_next_instruction_when_not_eq() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let kk = 0x05;
-        cpu.memory[PROG_MEM_MIN] = 0x40 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = kk;
-        cpu.cycle();
-        assert_eq!(cpu.program_counter, 0x0204);
-    }
-
-    #[test]
-    fn instruction_sne_vx_vy_skips_next_instruction_when_eq() {
-        let mut cpu = Chip8::new();
-        let vx = 0x0A;
-        let vy = 0x50;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.registers[(vy >> 4) as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x50 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-        cpu.cycle();
-        assert_eq!(cpu.program_counter, 0x0204);
-    }
-    #[test]
-    fn instruction_ld_vx_byte_loads_eight_bit_value_into_register() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let kk = 0x04;
-
-        cpu.memory[PROG_MEM_MIN] = 0x60 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = kk;
-
-        cpu.cycle();
-        assert_eq!(cpu.program_counter, 0x0202);
-        assert_eq!(cpu.registers[vx as usize], kk);
-    }
-    #[test]
-    fn instruction_add_bytes_to_register() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let kk = 0x01;
-
-        cpu.registers[vx as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x70 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = kk;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], kk + 1);
-    }
-    #[test]
-    fn instruction_ld_vx_vy_loads_registers() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x50;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.registers[(vy >> 4) as usize] = 0x02;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x02);
-    }
-    #[test]
-    fn instruction_or_vx_vy_registers() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x51;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.registers[(vy >> 4) as usize] = 0x02;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x03);
-    }
-    #[test]
-    fn instruction_and_vx_vy_registers() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x52;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.registers[(vy >> 4) as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x01);
-    }
-    #[test]
-    fn instruction_xor_vx_vy_registers() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x53;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.registers[(vy >> 4) as usize] = 0x00;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[vx as usize], 0x01);
-    }
-    #[test]
-    fn instruction_add_vx_vy_registers() {
-        //if there is a bug it is probably here
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x54;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.registers[(vy >> 4) as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 0);
-        assert_eq!(cpu.registers[vx as usize], 0x02);
-    }
-    #[test]
-    fn instruction_add_vx_vy_registers_with_carry() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x54;
-        cpu.registers[vx as usize] = 0xFF;
-        cpu.registers[(vy >> 4) as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 1);
-        assert_eq!(cpu.registers[vx as usize], 0x00);
-    }
-    #[test]
-    fn instruction_sub_vx_vy_registers() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x55;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.registers[(vy >> 4) as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 1);
-        assert_eq!(cpu.registers[vx as usize], 0x00);
-    }
-    #[test]
-    fn instruction_sub_vx_vy_registers_with_carry() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        let vy = 0x55;
-        cpu.registers[vx as usize] = 0x00;
-        cpu.registers[(vy >> 4) as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = vy;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 0);
-        assert_eq!(cpu.registers[vx as usize], 0xFF);
-    }
-    #[test]
-    fn instruction_shl_vx_vy() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = 0x0E;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 0);
-        assert_eq!(cpu.registers[vx as usize], 0x02);
-    }
-    #[test]
-    fn instruction_shl_vx_vy_overflow() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        cpu.registers[vx as usize] = 0xFF;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = 0x0E;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 1);
-        assert_eq!(cpu.registers[vx as usize], 0xFE);
-    }
-    #[test]
-    fn instruction_shr_vx_vy() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        cpu.registers[vx as usize] = 0x06;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = 0x06;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 0);
-        assert_eq!(cpu.registers[vx as usize], 0x03);
-    }
-    #[test]
-    fn instruction_shr_vx_vy_overflow() {
-        let mut cpu = Chip8::new();
-        let vx = 0x09;
-        cpu.registers[vx as usize] = 0x01;
-        cpu.memory[PROG_MEM_MIN] = 0x80 | vx;
-        cpu.memory[PROG_MEM_MIN + 1] = 0x06;
-
-        cpu.cycle();
-        assert_eq!(cpu.registers[0xF], 1);
-        assert_eq!(cpu.registers[vx as usize], 0x00);
-    }
-}
-
-// Debug Hex Print
-// let hex_v = format!("{:X}", instruction);
-// print!("{hex_v}\n");
+mod tests;
